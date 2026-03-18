@@ -38,13 +38,16 @@ data class SdatSseqFile(
      * - Pan, volume, expression and other continuous controllers map to the corresponding
      *   MIDI CC numbers.
      * - Program changes use bank-select CCs (0 / 32) plus a program-change message.
-     * - The sequence is played through once (loop count = 1); `JUMP` backward loops consume
-     *   one pass then stop.
+     * - Tempo changes map to SMF meta event 0x51.
+     * - `JUMP` backward loops are repeated [loopCount] times (default 1 = play once, no repeat).
      *
+     * @param loopCount Number of times to traverse each `JUMP` backward loop (minimum 1).
+     *   Use `1` (default) to play the sequence once straight through; use `2` to hear one loop
+     *   repetition; and so on.
      * @return A byte array containing the full SMF file.
      * @throws IllegalArgumentException if [data] does not contain a valid SSEQ file.
      */
-    fun toMidi(): ByteArray = SseqToMidi.convert(data)
+    fun toMidi(loopCount: Int = 1): ByteArray = SseqToMidi.convert(data, loopCount)
 
     /**
      * Compares two [SdatSseqFile] instances for structural equality, including [data] content.

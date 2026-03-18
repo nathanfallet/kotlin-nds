@@ -110,10 +110,11 @@ internal object SseqToMidi {
      * tracks are activated by the sequence.
      *
      * @param sseq The raw SSEQ file bytes (must start with the SSEQ magic).
+     * @param loopCount Number of times to traverse each `JUMP` backward loop (minimum 1).
      * @return A fully formed SMF byte array.
      * @throws IllegalArgumentException if [sseq] is too small or has an invalid magic.
      */
-    fun convert(sseq: ByteArray): ByteArray {
+    fun convert(sseq: ByteArray, loopCount: Int = 1): ByteArray {
         require(sseq.size >= 0x1C) { "SSEQ data too small (${sseq.size} < 0x1C)" }
         require(
             sseq[0] == 'S'.code.toByte() && sseq[1] == 'S'.code.toByte() &&
@@ -130,7 +131,7 @@ internal object SseqToMidi {
 
         // Initialise per-track state
         val tracks = Array(MAX_TRACKS) { TrackState() }
-        tracks[0].loopCount = 1
+        tracks[0].loopCount = maxOf(1, loopCount)
         tracks[0].absTime = 0
         tracks[0].noteWait = false
         tracks[0].offsetToTop = 0x1C

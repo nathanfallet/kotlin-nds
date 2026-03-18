@@ -679,6 +679,42 @@ class SseqToMidiTest {
         assertNotNull(eot, "End-of-track meta event not found")
     }
 
+    /**
+     * Verifies that [SdatSseqFile.toMidi] with `loopCount = 2` traverses the JUMP loop twice,
+     * producing more note-on events than a single-pass conversion.
+     *
+     * Layout: note 60 → JUMP back to start. With loopCount=1 the note plays once; with
+     * loopCount=2 it plays twice (the loop body executes an extra time before stopping).
+     */
+    @Test
+    fun `loopCount 2 produces more note events than loopCount 1`() {
+        val cmds = ByteArray(8)
+        cmds[0] = 0x3C  // note 60
+        cmds[1] = 0x64  // vel 100
+        val durBytes = varLen(1); durBytes.copyInto(cmds, 2)
+        val jumpPos = 3
+        cmds[jumpPos] = 0x94.toByte()          // JUMP
+        cmds[jumpPos + 1] = 0x00               // target = 0x1C (start of cmds)
+        cmds[jumpPos + 2] = 0x00
+        cmds[jumpPos + 3] = 0x00
+
+        val seq = makeSeqFile(buildSseq(cmds))
+        val midi1 = seq.toMidi(loopCount = 1)
+        val midi2 = seq.toMidi(loopCount = 2)
+
+        fun countNoteOns(midi: ByteArray): Int {
+            val events = collectEvents(midi)
+            return events.count { (_, data) -> data.isNotEmpty() && (data[0].toInt() and 0xF0) == 0x90 && data.size >= 3 && data[2] != 0.toByte() }
+        }
+
+        val notes1 = countNoteOns(midi1)
+        val notes2 = countNoteOns(midi2)
+        assertTrue(
+            notes2 > notes1,
+            "loopCount=2 should produce more note-on events than loopCount=1 (got $notes1 vs $notes2)"
+        )
+    }
+
     // =========================================================================
     // Tests: CALL (0x95) / RETURN (0xFD)
     // =========================================================================
