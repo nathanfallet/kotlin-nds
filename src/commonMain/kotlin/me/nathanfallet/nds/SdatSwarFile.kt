@@ -36,4 +36,17 @@ data class SdatSwarFile(
         result = 31 * result + unk
         return result
     }
+
+    /**
+     * Decodes every SWAV sample in this SWAR wave archive and returns one WAV byte array per sample.
+     *
+     * Each returned WAV is a complete, playable mono 16-bit PCM file. Supports all three NDS
+     * wave types (PCM8, PCM16, IMA-ADPCM); PCM8 is upsampled to 16-bit by multiplying by 256.
+     *
+     * The list order matches the SWAV entry order inside the SWAR DATA block.
+     *
+     * @return A list of WAV byte arrays, one per SWAV entry; empty if the archive has no entries.
+     * @throws IllegalArgumentException if [data] is too short or does not begin with "SWAR".
+     */
+    fun toWavList(): List<ByteArray> = NdsAudio.swarToWavList(data)
 }

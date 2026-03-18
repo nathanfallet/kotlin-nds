@@ -13,6 +13,8 @@ Kotlin Multiplatform utilities to work with .nds files
   back with automatic offset and CRC recalculation.
 - **NARC archive support** — Unpack and repack NARC containers, with both anonymous (index-based) and named (path-based)
   file access.
+- **SDAT archive support** — Unpack and repack SDAT sound archives; decode STRM streams and SWAR wave archives to
+  standard WAV files (PCM8, PCM16, IMA-ADPCM).
 - **Compression codecs** — BLZ, LZSS/LZ10, LZ11, RLE, and Huffman (4-bit & 8-bit). Auto-detection dispatches to the
   right codec from the magic byte.
 - **Multiplatform** — Runs on JVM, JavaScript (Node.js & browser), and Native (macOS, Linux, iOS, Windows, …).
@@ -126,6 +128,21 @@ val repacked: ByteArray = SdatArchive.pack(archive)
 
 The `unk` field on every entry type (`SdatSseqFile.unk`, `SdatSbnkFile.unk`, `SdatSwarFile.unk`,
 `SdatStrmFile.unk`) preserves the unknown u16 from the INFO struct so that round-trips are lossless.
+
+#### Converting to audio
+
+Streams and wave archives can be decoded to standard WAV files (16-bit signed PCM). All three NDS
+wave encodings are supported: PCM8, PCM16, and IMA-ADPCM.
+
+```kotlin
+// STRM → single WAV (may be stereo)
+val wav: ByteArray = archive.streams[0].toWav()
+File("bgm.wav").writeBytes(wav)
+
+// SWAR → one WAV per instrument sample (always mono)
+val wavs: List<ByteArray> = archive.waveArchives[0].toWavList()
+wavs.forEachIndexed { i, w -> File("sample_$i.wav").writeBytes(w) }
+```
 
 ### Compression
 

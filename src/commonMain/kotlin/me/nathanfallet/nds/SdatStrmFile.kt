@@ -50,4 +50,21 @@ data class SdatStrmFile(
         result = 31 * result + players
         return result
     }
+
+    /**
+     * Decodes this STRM file and returns the audio as a standard 16-bit PCM WAV byte array.
+     *
+     * Supports all three NDS wave types:
+     * - PCM8 (type 0): 8-bit signed PCM, upsampled to 16-bit by multiplying by 256.
+     * - PCM16 (type 1): 16-bit signed little-endian PCM, copied as-is.
+     * - IMA-ADPCM (type 2): 4-bit IMA-ADPCM decoded to 16-bit signed PCM.
+     *
+     * The returned WAV always has a 44-byte RIFF/WAV header followed by interleaved
+     * signed 16-bit little-endian PCM samples. Channel count and sample rate are taken
+     * directly from the STRM header fields.
+     *
+     * @return A byte array containing a complete, playable WAV file.
+     * @throws IllegalArgumentException if [data] is too short or has an invalid STRM magic.
+     */
+    fun toWav(): ByteArray = NdsAudio.strmToWav(data)
 }
