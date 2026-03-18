@@ -41,5 +41,8 @@ bin/
 ### Mac OS ###
 .DS_Store
 
+### JS ###
+yarn.lock
+
 ### File used for testing ###
 game.nds

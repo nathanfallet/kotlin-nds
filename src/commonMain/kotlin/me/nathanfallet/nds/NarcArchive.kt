@@ -144,6 +144,357 @@ object NarcArchive {
     }
 
     // -------------------------------------------------------------------------
+    // Named NARC — unpack
+    // -------------------------------------------------------------------------
+
+    /**
+     * Unpacks a NARC into a map of path → file data.
+     *
+     * For anonymous NARCs (minimal FNT) the keys are the decimal file indices
+     * ("0", "1", …).  For named NARCs the keys are slash-separated paths such
+     * as "sprites/player.ncgr".
+     */
+    fun unpackNamed(data: ByteArray): Map<String, ByteArray> {
+        require(data.size >= 16) { "NARC too small" }
+        require(data.decodeToString(0, 4) == "NARC") { "Not a NARC file" }
+
+        val headerSize = u16(data, 0x0C)
+        var pos = headerSize
+
+        var btafData: ByteArray? = null
+        var btnfData: ByteArray? = null
+        var gmifDataStart = -1
+
+        repeat(3) {
+            val magic = data.decodeToString(pos, pos + 4)
+            val size = u32(data, pos + 4).toInt()
+            when (magic) {
+                "BTAF" -> btafData = data.copyOfRange(pos + 8, pos + size)
+                "BTNF" -> btnfData = data.copyOfRange(pos + 8, pos + size)
+                "GMIF" -> gmifDataStart = pos + 8
+            }
+            pos += size
+        }
+
+        val fat = checkNotNull(btafData) { "BTAF section not found" }
+        val fnt = checkNotNull(btnfData) { "BTNF section not found" }
+        check(gmifDataStart >= 0) { "GMIF section not found" }
+
+        val numFiles = u32(fat, 0).toInt()
+        val rawFiles = List(numFiles) { i ->
+            val start = u32(fat, 4 + i * 8).toInt()
+            val end = u32(fat, 4 + i * 8 + 4).toInt()
+            if (start >= end) ByteArray(0)
+            else data.copyOfRange(gmifDataStart + start, gmifDataStart + end)
+        }
+
+        // Detect anonymous NARC: subtable starts with 0x00 terminator immediately
+        val rootSubtableOff = u32(fnt, 0).toInt()
+        val isAnonymous = fnt.size <= rootSubtableOff || fnt[rootSubtableOff] == 0x00.toByte()
+        if (isAnonymous) {
+            return rawFiles.mapIndexed { i, bytes -> i.toString() to bytes }.toMap()
+        }
+
+        // Parse FNT — build path for each file ID
+        val filePaths = Array(numFiles) { "" }
+        parseFnt(fnt, numFiles, filePaths)
+
+        return rawFiles.mapIndexed { i, bytes -> filePaths[i] to bytes }.toMap()
+    }
+
+    /** Walks the FNT and populates [filePaths] with the full path for each file ID. */
+    private fun parseFnt(fnt: ByteArray, numFiles: Int, filePaths: Array<String>) {
+        // Read number of directories from root entry (bytes 6-7)
+        val numDirs = u16(fnt, 6)
+
+        // Each directory entry is 8 bytes: subtableOffset(u32), firstFileId(u16), parentOrTotal(u16)
+        // Build a list of (subtableOffset, firstFileId, parentDirIndex)
+        data class DirEntry(val subtableOff: Int, val firstFileId: Int, val parentIdx: Int)
+
+        val dirs = Array(numDirs) { i ->
+            val base = i * 8
+            DirEntry(
+                subtableOff = u32(fnt, base).toInt(),
+                firstFileId = u16(fnt, base + 4),
+                parentIdx = if (i == 0) -1 else (u16(fnt, base + 6) - 0xF000)
+            )
+        }
+
+        // Build dir paths (root = "")
+        val dirPaths = Array(numDirs) { "" }
+        // BFS order — root's children will always have lower-indexed parents already resolved
+        for (i in 1 until numDirs) {
+            val parent = dirs[i].parentIdx
+            val parentPath = dirPaths[parent]
+            // We need the name of dir i from parent's subtable
+            // Scan the parent's subtable for the entry whose dirId == 0xF000 + i
+            val targetId = 0xF000 + i
+            var off = dirs[parent].subtableOff
+            outer@ while (off < fnt.size) {
+                val b = fnt[off++].toInt() and 0xFF
+                if (b == 0x00) break
+                val nameLen: Int
+                val isDir: Boolean
+                if (b <= 0x7F) {
+                    nameLen = b; isDir = false
+                } else {
+                    nameLen = b - 0x80; isDir = true
+                }
+                val name = fnt.decodeToString(off, off + nameLen)
+                off += nameLen
+                if (isDir) {
+                    val dirId = u16(fnt, off)
+                    off += 2
+                    if (dirId == targetId) {
+                        dirPaths[i] = if (parentPath.isEmpty()) name else "$parentPath/$name"
+                        break@outer
+                    }
+                }
+            }
+        }
+
+        // Now walk each directory's subtable and assign paths to files
+        for (i in 0 until numDirs) {
+            val dirPath = dirPaths[i]
+            var fileId = dirs[i].firstFileId
+            var off = dirs[i].subtableOff
+            while (off < fnt.size) {
+                val b = fnt[off++].toInt() and 0xFF
+                if (b == 0x00) break
+                if (b <= 0x7F) {
+                    // File entry
+                    val name = fnt.decodeToString(off, off + b)
+                    off += b
+                    if (fileId < filePaths.size) {
+                        filePaths[fileId] = if (dirPath.isEmpty()) name else "$dirPath/$name"
+                        fileId++
+                    }
+                } else {
+                    // Directory entry — skip name + 2-byte dir ID
+                    off += (b - 0x80) + 2
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Named NARC — pack
+    // -------------------------------------------------------------------------
+
+    /**
+     * Packs a named map into a NARC with a full FNT.
+     *
+     * Keys are slash-separated paths (e.g. "sprites/player.bin").  Files within
+     * the same directory are stored in sorted order.
+     */
+    fun packNamed(files: Map<String, ByteArray>): ByteArray {
+        if (files.isEmpty()) return pack(emptyList())
+
+        // Build directory tree
+        // dirChildren: dirIndex → sorted list of (name, isDir, fileIdOrDirIdx)
+        data class Entry(val name: String, val isDir: Boolean, val id: Int)
+
+        val dirNames = mutableListOf("")           // index 0 = root ""
+        val dirParent = mutableListOf(-1)
+        val dirEntries = mutableListOf<MutableList<Entry>>(mutableListOf())
+
+        // Sort paths so directory parents are created before children
+        val sortedPaths = files.keys.sorted()
+        val fileOrder = mutableListOf<String>()     // file ID order
+
+        fun ensureDir(segments: List<String>): Int {
+            var current = 0
+            for (seg in segments) {
+                val existing = dirEntries[current].indexOfFirst { it.isDir && it.name == seg }
+                if (existing >= 0) {
+                    current = dirEntries[current][existing].id
+                } else {
+                    val newIdx = dirNames.size
+                    dirNames.add(seg)
+                    dirParent.add(current)
+                    dirEntries.add(mutableListOf())
+                    dirEntries[current].add(Entry(seg, true, newIdx))
+                    current = newIdx
+                }
+            }
+            return current
+        }
+
+        for (path in sortedPaths) {
+            val parts = path.split("/")
+            val dirIdx = ensureDir(parts.dropLast(1))
+            val fileName = parts.last()
+            val fileId = fileOrder.size
+            fileOrder.add(path)
+            dirEntries[dirIdx].add(Entry(fileName, false, fileId))
+        }
+
+        // Sort each directory's entries: dirs first (by name), then files (by name)
+        for (entries in dirEntries) {
+            entries.sortWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+        }
+
+        // Rebuild fileId assignment in the sorted order
+        val fileIdMap = mutableMapOf<String, Int>()
+        var nextFileId = 0
+        fun assignIds(dirIdx: Int) {
+            for (e in dirEntries[dirIdx]) {
+                if (!e.isDir) {
+                    // find path
+                    val dirPath = buildDirPath(dirIdx, dirNames, dirParent)
+                    val fullPath = if (dirPath.isEmpty()) e.name else "$dirPath/${e.name}"
+                    fileIdMap[fullPath] = nextFileId++
+                }
+            }
+            for (e in dirEntries[dirIdx]) {
+                if (e.isDir) assignIds(e.id)
+            }
+        }
+        assignIds(0)
+
+        // Ordered file list for GMIF
+        val orderedFiles = Array<ByteArray>(files.size) { ByteArray(0) }
+        for ((path, bytes) in files) {
+            val id = fileIdMap[path] ?: continue
+            orderedFiles[id] = bytes
+        }
+
+        // Build FNT
+        val numDirs = dirNames.size
+        val dirFirstFileId = IntArray(numDirs)
+        // Compute firstFileId per directory
+        var fid = 0
+        fun computeFirstFileIds(dirIdx: Int) {
+            dirFirstFileId[dirIdx] = fid
+            for (e in dirEntries[dirIdx]) {
+                if (!e.isDir) fid++
+            }
+            for (e in dirEntries[dirIdx]) {
+                if (e.isDir) computeFirstFileIds(e.id)
+            }
+        }
+        computeFirstFileIds(0)
+
+        // Build subtables
+        val subtables = Array(numDirs) { ByteArray(0) }
+        for (i in 0 until numDirs) {
+            val buf = mutableListOf<Byte>()
+            for (e in dirEntries[i]) {
+                if (!e.isDir) {
+                    val nameBytes = e.name.encodeToByteArray()
+                    buf.add(nameBytes.size.toByte())
+                    buf.addAll(nameBytes.toList())
+                } else {
+                    val nameBytes = e.name.encodeToByteArray()
+                    buf.add((0x80 + nameBytes.size).toByte())
+                    buf.addAll(nameBytes.toList())
+                    val dirId = 0xF000 + e.id
+                    buf.add((dirId and 0xFF).toByte())
+                    buf.add((dirId ushr 8).toByte())
+                }
+            }
+            buf.add(0x00)  // end of subtable
+            // Pad to 4-byte alignment
+            while (buf.size % 4 != 0) buf.add(0xFF.toByte())
+            subtables[i] = buf.toByteArray()
+        }
+
+        // Directory table: numDirs × 8 bytes
+        val dirTableSize = numDirs * 8
+        // Compute subtable offsets (from FNT start)
+        val subtableOffsets = IntArray(numDirs)
+        var off = dirTableSize
+        for (i in 0 until numDirs) {
+            subtableOffsets[i] = off
+            off += subtables[i].size
+        }
+        val fntSize = off
+        // Pad fntSize to 4-byte boundary
+        val fntPadded = align4(fntSize)
+
+        val fnt = ByteArray(fntPadded) { 0xFF.toByte() }
+        // Write directory table
+        for (i in 0 until numDirs) {
+            val base = i * 8
+            writeU32(fnt, base, subtableOffsets[i].toLong())
+            fnt[base + 4] = (dirFirstFileId[i] and 0xFF).toByte()
+            fnt[base + 5] = (dirFirstFileId[i] ushr 8).toByte()
+            val util = if (i == 0) numDirs else (0xF000 + dirParent[i])
+            fnt[base + 6] = (util and 0xFF).toByte()
+            fnt[base + 7] = (util ushr 8).toByte()
+        }
+        // Write subtables
+        for (i in 0 until numDirs) {
+            subtables[i].copyInto(fnt, subtableOffsets[i])
+        }
+
+        return assembleNarc(orderedFiles.toList(), fnt)
+    }
+
+    private fun buildDirPath(dirIdx: Int, dirNames: List<String>, dirParent: List<Int>): String {
+        if (dirIdx == 0) return ""
+        val parent = buildDirPath(dirParent[dirIdx], dirNames, dirParent)
+        return if (parent.isEmpty()) dirNames[dirIdx] else "$parent/${dirNames[dirIdx]}"
+    }
+
+    /** Assembles a complete NARC from an ordered file list and a pre-built FNT byte array. */
+    private fun assembleNarc(files: List<ByteArray>, fnt: ByteArray): ByteArray {
+        val numFiles = files.size
+        val gmifData = buildGmifData(files)
+
+        val fatEntries = ByteArray(numFiles * 8)
+        var offset = 0
+        for ((i, file) in files.withIndex()) {
+            writeU32(fatEntries, i * 8, offset.toLong())
+            writeU32(fatEntries, i * 8 + 4, (offset + file.size).toLong())
+            offset += align4(file.size)
+        }
+
+        val btafSize = 8 + 4 + fatEntries.size
+        val btaf = ByteArray(btafSize).also {
+            it[0] = 'B'.code.toByte(); it[1] = 'T'.code.toByte()
+            it[2] = 'A'.code.toByte(); it[3] = 'F'.code.toByte()
+            writeU32(it, 4, btafSize.toLong())
+            writeU32(it, 8, numFiles.toLong())
+            fatEntries.copyInto(it, 12)
+        }
+
+        val btnfSize = 8 + fnt.size
+        val btnf = ByteArray(btnfSize).also {
+            it[0] = 'B'.code.toByte(); it[1] = 'T'.code.toByte()
+            it[2] = 'N'.code.toByte(); it[3] = 'F'.code.toByte()
+            writeU32(it, 4, btnfSize.toLong())
+            fnt.copyInto(it, 8)
+        }
+
+        val gmifSize = 8 + gmifData.size
+        val gmif = ByteArray(gmifSize).also {
+            it[0] = 'G'.code.toByte(); it[1] = 'M'.code.toByte()
+            it[2] = 'I'.code.toByte(); it[3] = 'F'.code.toByte()
+            writeU32(it, 4, gmifSize.toLong())
+            gmifData.copyInto(it, 8)
+        }
+
+        val totalSize = 16 + btafSize + btnfSize + gmifSize
+        val header = ByteArray(16).also {
+            it[0] = 'N'.code.toByte(); it[1] = 'A'.code.toByte()
+            it[2] = 'R'.code.toByte(); it[3] = 'C'.code.toByte()
+            it[4] = 0xFE.toByte(); it[5] = 0xFF.toByte()
+            it[6] = 0x00; it[7] = 0x01
+            writeU32(it, 8, totalSize.toLong())
+            it[12] = 0x10; it[13] = 0x00
+            it[14] = 0x03; it[15] = 0x00
+        }
+
+        val out = ByteArray(totalSize)
+        var cur = 0
+        for (part in listOf(header, btaf, btnf, gmif)) {
+            part.copyInto(out, cur); cur += part.size
+        }
+        return out
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
