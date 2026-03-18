@@ -56,7 +56,7 @@ val ovl1: ByteArray = rom.arm7Overlays[0]
 
 // Replace an overlay (returns a new NdsRom — original is unchanged)
 val modifiedRom = rom.withArm9Overlay(0, patchedOverlayBytes)
-                     .withArm7Overlay(0, patchedArm7OverlayBytes)
+    .withArm7Overlay(0, patchedArm7OverlayBytes)
 
 File("game_modified.nds").writeBytes(modifiedRom.pack())
 ```
@@ -85,6 +85,47 @@ val repackedNamed: ByteArray = NarcArchive.packNamed(
 ```
 
 `unpackNamed` falls back to index keys (`"0"`, `"1"`, …) for anonymous NARCs, so it is safe to use on either type.
+
+### SDAT Archives
+
+SDAT (Sound Data Archive) bundles all sound assets for a DS game: sequences (SSEQ), banks (SBNK),
+wave archives (SWAR), and streams (STRM). Each file carries metadata read directly from the INFO block.
+
+```kotlin
+val sdatBytes = rom.files["sound/sound_data.sdat"]!!
+val archive = SdatArchive.unpack(sdatBytes)
+
+// Access by index
+val seq: SdatSseqFile = archive.sequences[0]
+val bank: SdatSbnkFile = archive.banks[0]
+val war: SdatSwarFile = archive.waveArchives[0]
+val strm: SdatStrmFile = archive.streams[0]
+
+println(seq.name)            // e.g. "SEQ_TITLE"
+println(seq.bank)            // SBNK index this sequence uses
+println(seq.volume)          // playback volume (0–127)
+println(seq.channelPriority) // hardware channel priority
+println(seq.playerPriority)  // sequence player priority
+println(seq.players)         // allowed players bitmask
+
+println(bank.wars)           // List<Int> of SWAR indices, -1 = unused slot
+
+println(strm.volume)         // stream playback volume
+println(strm.priority)       // stream priority
+println(strm.players)        // stream player bitmask
+
+// Look up by symbolic name (from the SYMB block)
+val title: SdatSseqFile? = archive.sequenceByName("SEQ_TITLE")
+val drums: SdatSbnkFile? = archive.bankByName("BANK_DRUMS")
+val sfx: SdatSwarFile? = archive.waveArchiveByName("WAVE_SFX")
+val bgm: SdatStrmFile? = archive.streamByName("STRM_BGM")
+
+// Repack (SYMB block is only written when at least one name differs from the fallback)
+val repacked: ByteArray = SdatArchive.pack(archive)
+```
+
+The `unk` field on every entry type (`SdatSseqFile.unk`, `SdatSbnkFile.unk`, `SdatSwarFile.unk`,
+`SdatStrmFile.unk`) preserves the unknown u16 from the INFO struct so that round-trips are lossless.
 
 ### Compression
 
