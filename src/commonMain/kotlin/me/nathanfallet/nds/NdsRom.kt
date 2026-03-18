@@ -49,11 +49,37 @@ class NdsRom private constructor(
     // Copy-and-modify helpers
     // -------------------------------------------------------------------------
 
+    /** Returns the data of each ARM9 overlay in table order. */
+    val arm9Overlays: List<ByteArray> get() = overlayFiles(arm9OverlayTable)
+
+    /** Returns the data of each ARM7 overlay in table order. */
+    val arm7Overlays: List<ByteArray> get() = overlayFiles(arm7OverlayTable)
+
+    private fun overlayFiles(table: ByteArray): List<ByteArray> {
+        val count = table.size / 32
+        return List(count) { i ->
+            val fatId = readU32(table, i * 32 + 24).toInt()
+            otherFatEntries[fatId] ?: ByteArray(0)
+        }
+    }
+
     fun withArm9(data: ByteArray) = copy(arm9 = data)
 
     fun withArm7(data: ByteArray) = copy(arm7 = data)
     fun withFile(path: String, data: ByteArray) = copy(files = files + (path to data))
     fun withFiles(updates: Map<String, ByteArray>) = copy(files = files + updates)
+
+    /** Returns a new [NdsRom] with the ARM9 overlay at [index] replaced by [data]. */
+    fun withArm9Overlay(index: Int, data: ByteArray): NdsRom {
+        val fatId = readU32(arm9OverlayTable, index * 32 + 24).toInt()
+        return copy(otherFatEntries = otherFatEntries + (fatId to data))
+    }
+
+    /** Returns a new [NdsRom] with the ARM7 overlay at [index] replaced by [data]. */
+    fun withArm7Overlay(index: Int, data: ByteArray): NdsRom {
+        val fatId = readU32(arm7OverlayTable, index * 32 + 24).toInt()
+        return copy(otherFatEntries = otherFatEntries + (fatId to data))
+    }
 
     // -------------------------------------------------------------------------
     // Pack — rebuild the ROM from in-memory state
@@ -116,7 +142,7 @@ class NdsRom private constructor(
 
         val newArm9OvlOff = if (arm9OverlayTable.isNotEmpty()) place(arm9OverlayTable) else 0
         val newArm7OvlOff = if (arm7OverlayTable.isNotEmpty()) place(arm7OverlayTable) else 0
-        val newBannerOff = place(banner)
+        val newBannerOff = if (banner.isNotEmpty()) place(banner) else 0
 
         // file data
         val newFileOffsets = mutableMapOf<Int, Int>() // fileId -> start offset
@@ -146,7 +172,7 @@ class NdsRom private constructor(
         writeU32(newHeader, 0x04C, fatSize.toLong())         // FAT size = allFileIds*8
         if (arm9OverlayTable.isNotEmpty()) writeU32(newHeader, 0x050, newArm9OvlOff.toLong())
         if (arm7OverlayTable.isNotEmpty()) writeU32(newHeader, 0x058, newArm7OvlOff.toLong())
-        writeU32(newHeader, 0x068, newBannerOff.toLong())
+        if (banner.isNotEmpty()) writeU32(newHeader, 0x068, newBannerOff.toLong())
         writeU32(newHeader, 0x080, cursor.toLong())          // total used ROM size
 
         // Recompute header CRC16 (NDS spec: CRC16 over bytes 0x000..0x15D, stored at 0x15E)
@@ -174,6 +200,7 @@ class NdsRom private constructor(
         arm9: ByteArray = this.arm9,
         arm7: ByteArray = this.arm7,
         files: Map<String, ByteArray> = this.files,
+        otherFatEntries: Map<Int, ByteArray> = this.otherFatEntries,
     ) = NdsRom(
         rawHeader, arm9, arm7,
         arm9OverlayTable, arm7OverlayTable,

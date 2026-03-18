@@ -44,6 +44,25 @@ val modifiedRom = rom.withFile("a/0/3/2", newFileBytes)
 File("game_modified.nds").writeBytes(modifiedRom.pack())
 ```
 
+### Overlays
+
+ARM9 and ARM7 overlays are loaded at runtime by the DS firmware. They are accessed by index, matching the order in the
+ROM's overlay table:
+
+```kotlin
+// Read overlays
+val ovl0: ByteArray = rom.arm9Overlays[0]
+val ovl1: ByteArray = rom.arm7Overlays[0]
+
+// Replace an overlay (returns a new NdsRom — original is unchanged)
+val modifiedRom = rom.withArm9Overlay(0, patchedOverlayBytes)
+                     .withArm7Overlay(0, patchedArm7OverlayBytes)
+
+File("game_modified.nds").writeBytes(modifiedRom.pack())
+```
+
+Overlay files are typically BLZ-compressed — use `BlzCodec` to decompress/recompress them before patching.
+
 ### NARC Archives
 
 NARC files bundle multiple assets inside a single ROM file. Two modes are supported:
