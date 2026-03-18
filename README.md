@@ -13,6 +13,8 @@ Kotlin Multiplatform utilities to work with .nds files
   back with automatic offset and CRC recalculation.
 - **NARC archive support** — Unpack and repack NARC containers, with both anonymous (index-based) and named (path-based)
   file access.
+- **SDAT archive support** — Unpack and repack SDAT sound archives; decode STRM streams and SWAR wave archives to
+  standard WAV files (PCM8, PCM16, IMA-ADPCM); convert SSEQ sequences to standard MIDI files.
 - **Compression codecs** — BLZ, LZSS/LZ10, LZ11, RLE, and Huffman (4-bit & 8-bit). Auto-detection dispatches to the
   right codec from the magic byte.
 - **Multiplatform** — Runs on JVM, JavaScript (Node.js & browser), and Native (macOS, Linux, iOS, Windows, …).
@@ -21,7 +23,7 @@ Kotlin Multiplatform utilities to work with .nds files
 
 ```kotlin
 dependencies {
-    implementation("me.nathanfallet.nds:kotlin-nds:1.1.0")
+    implementation("me.nathanfallet.nds:kotlin-nds:1.2.0")
 }
 ```
 
@@ -56,7 +58,7 @@ val ovl1: ByteArray = rom.arm7Overlays[0]
 
 // Replace an overlay (returns a new NdsRom — original is unchanged)
 val modifiedRom = rom.withArm9Overlay(0, patchedOverlayBytes)
-                     .withArm7Overlay(0, patchedArm7OverlayBytes)
+    .withArm7Overlay(0, patchedArm7OverlayBytes)
 
 File("game_modified.nds").writeBytes(modifiedRom.pack())
 ```
@@ -85,6 +87,67 @@ val repackedNamed: ByteArray = NarcArchive.packNamed(
 ```
 
 `unpackNamed` falls back to index keys (`"0"`, `"1"`, …) for anonymous NARCs, so it is safe to use on either type.
+
+### SDAT Archives
+
+SDAT (Sound Data Archive) bundles all sound assets for a DS game: sequences (SSEQ), banks (SBNK),
+wave archives (SWAR), and streams (STRM). Each file carries metadata read directly from the INFO block.
+
+```kotlin
+val sdatBytes = rom.files["sound/sound_data.sdat"]!!
+val archive = SdatArchive.unpack(sdatBytes)
+
+// Access by index
+val seq: SdatSseqFile = archive.sequences[0]
+val bank: SdatSbnkFile = archive.banks[0]
+val war: SdatSwarFile = archive.waveArchives[0]
+val strm: SdatStrmFile = archive.streams[0]
+
+println(seq.name)            // e.g. "SEQ_TITLE"
+println(seq.bank)            // SBNK index this sequence uses
+println(seq.volume)          // playback volume (0–127)
+println(seq.channelPriority) // hardware channel priority
+println(seq.playerPriority)  // sequence player priority
+println(seq.players)         // allowed players bitmask
+
+println(bank.wars)           // List<Int> of SWAR indices, -1 = unused slot
+
+println(strm.volume)         // stream playback volume
+println(strm.priority)       // stream priority
+println(strm.players)        // stream player bitmask
+
+// Look up by symbolic name (from the SYMB block)
+val title: SdatSseqFile? = archive.sequenceByName("SEQ_TITLE")
+val drums: SdatSbnkFile? = archive.bankByName("BANK_DRUMS")
+val sfx: SdatSwarFile? = archive.waveArchiveByName("WAVE_SFX")
+val bgm: SdatStrmFile? = archive.streamByName("STRM_BGM")
+
+// Repack (SYMB block is only written when at least one name differs from the fallback)
+val repacked: ByteArray = SdatArchive.pack(archive)
+```
+
+The `unk` field on every entry type (`SdatSseqFile.unk`, `SdatSbnkFile.unk`, `SdatSwarFile.unk`,
+`SdatStrmFile.unk`) preserves the unknown u16 from the INFO struct so that round-trips are lossless.
+
+#### Converting to audio
+
+Streams and wave archives can be decoded to standard WAV files (16-bit signed PCM). All three NDS
+wave encodings are supported: PCM8, PCM16, and IMA-ADPCM. Sequences can be exported to standard
+MIDI files.
+
+```kotlin
+// STRM → single WAV (may be stereo)
+val wav: ByteArray = archive.streams[0].toWav()
+File("bgm.wav").writeBytes(wav)
+
+// SWAR → one WAV per instrument sample (always mono)
+val wavs: List<ByteArray> = archive.waveArchives[0].toWavList()
+wavs.forEachIndexed { i, w -> File("sample_$i.wav").writeBytes(w) }
+
+// SSEQ → standard MIDI file (uses General MIDI instruments, not game sounds)
+val mid: ByteArray = archive.sequences[0].toMidi()
+File("bgm.mid").writeBytes(mid)
+```
 
 ### Compression
 
