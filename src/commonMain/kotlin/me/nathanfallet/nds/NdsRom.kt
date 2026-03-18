@@ -15,26 +15,50 @@ package me.nathanfallet.nds
  *   (file data at offsets recorded in FAT)
  */
 class NdsRom private constructor(
-    /** Raw 512-byte ROM header; offset fields are updated during [pack]. */
+    /**
+     * Raw 512-byte ROM header; offset fields are recalculated during [pack].
+     */
     val rawHeader: ByteArray,
+    /**
+     * ARM9 binary (the main game code, loaded at the address given in the ROM header).
+     */
     val arm9: ByteArray,
+    /**
+     * ARM7 binary (sound/wireless co-processor code, loaded at the address given in the ROM header).
+     */
     val arm7: ByteArray,
-    /** Raw bytes of the ARM9 overlay table (32 bytes × N entries). */
+    /**
+     * Raw bytes of the ARM9 overlay table (32 bytes × N entries).
+     * Use [arm9Overlays] to access individual overlay data by index.
+     */
     val arm9OverlayTable: ByteArray,
-    /** Raw bytes of the ARM7 overlay table (32 bytes × N entries). */
+    /**
+     * Raw bytes of the ARM7 overlay table (32 bytes × N entries).
+     * Use [arm7Overlays] to access individual overlay data by index.
+     */
     val arm7OverlayTable: ByteArray,
-    /** icon/title banner block. */
+    /**
+     * Icon/title banner block, or an empty array if the ROM carries no banner.
+     */
     val banner: ByteArray,
-    /** All files in the ROM filesystem, keyed by virtual path (e.g. "a/0/3/2"). */
+    /**
+     * All files in the ROM filesystem, keyed by virtual path (e.g. `"a/0/3/2"`).
+     */
     val files: Map<String, ByteArray>,
     // ---- internal state needed for round-trip ----
     private val fntBytes: ByteArray,
-    /** Maps every virtual path to its original FAT file-ID. */
+    /**
+     * Maps every virtual path to its original FAT file-ID.
+     */
     private val pathToFileId: Map<String, Int>,
-    /** FAT entries for file IDs that are NOT part of the virtual filesystem
-     *  (e.g. overlay files are stored as FAT entries but accessed via the overlay table). */
+    /**
+     * FAT entries for file IDs that are NOT part of the virtual filesystem
+     * (e.g. overlay files are stored as FAT entries but accessed via the overlay table).
+     */
     private val otherFatEntries: Map<Int, ByteArray>,
-    /** Bytes between end of header (0x200) and start of ARM9 — the NDS secure area. */
+    /**
+     * Bytes between end of header (0x200) and start of ARM9 — the NDS secure area.
+     */
     private val preArm9Data: ByteArray,
 ) {
 
@@ -42,17 +66,30 @@ class NdsRom private constructor(
     // Public accessors
     // -------------------------------------------------------------------------
 
+    /**
+     * Four-character game code read from header bytes 0x0C–0x0F (e.g. `"IPKE"`).
+     */
     val gameCode: String get() = rawHeader.decodeToString(0x0C, 0x10)
+
+    /**
+     * Game title read from header bytes 0x00–0x0B, with trailing NUL characters stripped.
+     */
     val gameTitle: String get() = rawHeader.decodeToString(0x00, 0x0C).trimEnd('\u0000')
 
     // -------------------------------------------------------------------------
     // Copy-and-modify helpers
     // -------------------------------------------------------------------------
 
-    /** Returns the data of each ARM9 overlay in table order. */
+    /**
+     * Raw file data for each ARM9 overlay, in overlay-table order.
+     * Index 0 corresponds to the first entry in the ARM9 overlay table.
+     */
     val arm9Overlays: List<ByteArray> get() = overlayFiles(arm9OverlayTable)
 
-    /** Returns the data of each ARM7 overlay in table order. */
+    /**
+     * Raw file data for each ARM7 overlay, in overlay-table order.
+     * Index 0 corresponds to the first entry in the ARM7 overlay table.
+     */
     val arm7Overlays: List<ByteArray> get() = overlayFiles(arm7OverlayTable)
 
     private fun overlayFiles(table: ByteArray): List<ByteArray> {
@@ -63,19 +100,66 @@ class NdsRom private constructor(
         }
     }
 
+    /**
+     * Returns a new [NdsRom] with the ARM9 binary replaced by [data].
+     * The original instance is unchanged.
+     *
+     * @param data The new ARM9 binary to embed.
+     * @return A copy of this ROM with the updated ARM9.
+     */
     fun withArm9(data: ByteArray) = copy(arm9 = data)
 
+    /**
+     * Returns a new [NdsRom] with the ARM7 binary replaced by [data].
+     * The original instance is unchanged.
+     *
+     * @param data The new ARM7 binary to embed.
+     * @return A copy of this ROM with the updated ARM7.
+     */
     fun withArm7(data: ByteArray) = copy(arm7 = data)
+
+    /**
+     * Returns a new [NdsRom] with the filesystem file at [path] replaced by [data].
+     * If [path] does not exist in the original ROM this call has no effect on the packed output.
+     * The original instance is unchanged.
+     *
+     * @param path Virtual filesystem path of the file to replace (e.g. `"a/0/3/2"`).
+     * @param data New file contents.
+     * @return A copy of this ROM with the updated file.
+     */
     fun withFile(path: String, data: ByteArray) = copy(files = files + (path to data))
+
+    /**
+     * Returns a new [NdsRom] with multiple filesystem files replaced at once.
+     * Keys in [updates] that do not exist in the original ROM are silently ignored.
+     * The original instance is unchanged.
+     *
+     * @param updates Map of virtual filesystem paths to new file contents.
+     * @return A copy of this ROM with the updated files.
+     */
     fun withFiles(updates: Map<String, ByteArray>) = copy(files = files + updates)
 
-    /** Returns a new [NdsRom] with the ARM9 overlay at [index] replaced by [data]. */
+    /**
+     * Returns a new [NdsRom] with the ARM9 overlay at [index] replaced by [data].
+     * The original instance is unchanged.
+     *
+     * @param index Zero-based position in the ARM9 overlay table.
+     * @param data New overlay file contents (typically BLZ-compressed ARM code).
+     * @return A copy of this ROM with the updated ARM9 overlay.
+     */
     fun withArm9Overlay(index: Int, data: ByteArray): NdsRom {
         val fatId = readU32(arm9OverlayTable, index * 32 + 24).toInt()
         return copy(otherFatEntries = otherFatEntries + (fatId to data))
     }
 
-    /** Returns a new [NdsRom] with the ARM7 overlay at [index] replaced by [data]. */
+    /**
+     * Returns a new [NdsRom] with the ARM7 overlay at [index] replaced by [data].
+     * The original instance is unchanged.
+     *
+     * @param index Zero-based position in the ARM7 overlay table.
+     * @param data New overlay file contents (typically BLZ-compressed ARM code).
+     * @return A copy of this ROM with the updated ARM7 overlay.
+     */
     fun withArm7Overlay(index: Int, data: ByteArray): NdsRom {
         val fatId = readU32(arm7OverlayTable, index * 32 + 24).toInt()
         return copy(otherFatEntries = otherFatEntries + (fatId to data))
@@ -89,16 +173,22 @@ class NdsRom private constructor(
      * Serialises the (possibly modified) ROM back to a byte array.
      *
      * Layout:
-     *   0x000  header (512 B)
-     *   0x200  pre-ARM9 region (secure area — preserved verbatim)
-     *   …      ARM9  (at original arm9Off, same as original ROM)
-     *   …      ARM7
-     *   …      FNT
-     *   …      FAT  (rebuilt with new file offsets)
-     *   …      ARM9 overlay table
-     *   …      ARM7 overlay table
-     *   …      banner
-     *   …      file data (in file-ID order, each 4-byte aligned)
+     * ```
+     * 0x000  header (512 B)
+     * 0x200  pre-ARM9 region (secure area — preserved verbatim)
+     * …      ARM9  (at original arm9Off, same as original ROM)
+     * …      ARM7
+     * …      FNT
+     * …      FAT  (rebuilt with new file offsets)
+     * …      ARM9 overlay table
+     * …      ARM7 overlay table
+     * …      banner
+     * …      file data (in file-ID order, each 4-byte aligned)
+     * ```
+     *
+     * All header offset and size fields are recalculated; the header CRC-16 is recomputed.
+     *
+     * @return The complete ROM image as a byte array, ready to be written to disk.
      */
     fun pack(): ByteArray {
         // Build a sorted list of all file IDs
@@ -213,7 +303,18 @@ class NdsRom private constructor(
 
     companion object {
 
-        /** Parse an NDS ROM image into an [NdsRom] instance. */
+        /**
+         * Parses a raw NDS ROM image into an [NdsRom] instance.
+         *
+         * Reads all sections described in the 512-byte header: ARM9/ARM7 binaries,
+         * overlay tables, the filesystem (FNT + FAT), and the icon/title banner.
+         * Overlay file data is stored internally and accessible via [arm9Overlays]
+         * and [arm7Overlays].
+         *
+         * @param data The complete ROM image as a byte array.
+         * @return A fully-populated [NdsRom] ready for inspection or modification
+         *   via the `with*` helpers and [pack].
+         */
         fun parse(data: ByteArray): NdsRom {
             val header = data.copyOfRange(0, 0x200)
 

@@ -20,7 +20,11 @@ object BlzCodec {
 
     /**
      * Decompresses a BLZ-encoded buffer.
-     * Returns the input unchanged if it carries the "not encoded" marker (inc_len == 0).
+     *
+     * @param input The BLZ-encoded byte array (footer-based format, no magic byte).
+     * @return The decompressed data, or a copy of [input] if it carries
+     *   the "not encoded" marker (`inc_len == 0`).
+     * @throws IllegalArgumentException if the BLZ footer is malformed.
      */
     fun decompress(input: ByteArray): ByteArray {
         val pakLen = input.size
@@ -93,13 +97,15 @@ object BlzCodec {
     /**
      * Compresses [input] using BLZ.
      *
-     * @param arm9 When true the first 0x4000 bytes are left uncompressed
-     *             (required for DS ARM9 secure-area binaries).
-     *             The binary is validated: magic bytes at 0x00/0x04/0x08 must equal
-     *             0xE7FFDEFF.toLong(), the half-word at 0x0C must be 0xDEFF, and the word at
-     *             0x7FE must be 0.  The secure-area CRC16 (bytes 0x10–0x7FF) is
-     *             recalculated and written to 0x0E in the output before compression.
-     * @throws IllegalArgumentException if [arm9] is true but the binary fails validation.
+     * @param input The raw binary data to compress.
+     * @param arm9 When `true` the first 0x4000 bytes are left uncompressed
+     *   (required for DS ARM9 secure-area binaries). The binary is validated:
+     *   magic bytes at 0x00/0x04/0x08 must equal `0xE7FFDEFF`, the half-word at
+     *   0x0C must be `0xDEFF`, and the word at 0x7FE must be `0`. The secure-area
+     *   CRC-16 (bytes 0x10–0x7FF) is recalculated and written to 0x0E before compression.
+     * @return The BLZ-encoded byte array. Returns a "not encoded" marker if compression
+     *   would not reduce the size.
+     * @throws IllegalArgumentException if [arm9] is `true` but the binary fails validation.
      */
     fun compress(input: ByteArray, arm9: Boolean = false): ByteArray {
         val rawLen = input.size
@@ -111,13 +117,13 @@ object BlzCodec {
             require(rawLen >= 0x4000) {
                 "BLZ: ARM9 binary too short ($rawLen bytes, need at least 0x4000)"
             }
-            require(readU32(rawBuf, 0x00) == 0xE7FFDEFF.toLong()) {
+            require(readU32(rawBuf, 0x00) == 0xE7FFDEFF) {
                 "BLZ: ARM9 secure-area magic missing at +0x00"
             }
-            require(readU32(rawBuf, 0x04) == 0xE7FFDEFF.toLong()) {
+            require(readU32(rawBuf, 0x04) == 0xE7FFDEFF) {
                 "BLZ: ARM9 secure-area magic missing at +0x04"
             }
-            require(readU32(rawBuf, 0x08) == 0xE7FFDEFF.toLong()) {
+            require(readU32(rawBuf, 0x08) == 0xE7FFDEFF) {
                 "BLZ: ARM9 secure-area magic missing at +0x08"
             }
             require(readU16(rawBuf, 0x0C) == 0xDEFF) {
@@ -213,7 +219,14 @@ object BlzCodec {
     // Output builders
     // -------------------------------------------------------------------------
 
-    /** Produces a "not encoded" BLZ file: raw bytes padded to 4, then four zero bytes. */
+    /**
+     * Produces a "not encoded" BLZ output: raw bytes padded to 4-byte alignment,
+     * followed by four zero bytes (the `inc_len == 0` sentinel).
+     *
+     * @param raw The source byte array.
+     * @param rawLen Number of bytes from [raw] to include.
+     * @return The uncompressed BLZ output.
+     */
     private fun buildUncompressed(raw: ByteArray, rawLen: Int): ByteArray {
         val padded = (rawLen + 3) and -4
         val out = ByteArray(padded + 4)

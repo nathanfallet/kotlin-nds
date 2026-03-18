@@ -1,5 +1,9 @@
 package me.nathanfallet.nds
 
+import me.nathanfallet.nds.NarcArchive.unpack
+import me.nathanfallet.nds.NarcArchive.unpackNamed
+
+
 /**
  * Reads and writes Nintendo DS NARC container files.
  *
@@ -37,7 +41,10 @@ object NarcArchive {
 
     /**
      * Extracts all files from a NARC container.
-     * Returns the files in their original order (index = file ID).
+     *
+     * @param data The raw NARC bytes.
+     * @return The files in their original order; index equals the file ID.
+     * @throws IllegalArgumentException if the data is not a valid NARC container.
      */
     fun unpack(data: ByteArray): List<ByteArray> {
         require(data.size >= 16) { "NARC too small" }
@@ -79,8 +86,11 @@ object NarcArchive {
     // -------------------------------------------------------------------------
 
     /**
-     * Packs a list of files into a NARC container.
-     * Files are stored in the given order; they are accessed by index (no names).
+     * Packs a list of files into an anonymous NARC container.
+     * Files are stored in the given order and accessed by index (no name table).
+     *
+     * @param files The file data to pack, in file-ID order.
+     * @return A valid NARC byte array.
      */
     fun pack(files: List<ByteArray>): ByteArray {
         val numFiles = files.size
@@ -151,8 +161,12 @@ object NarcArchive {
      * Unpacks a NARC into a map of path → file data.
      *
      * For anonymous NARCs (minimal FNT) the keys are the decimal file indices
-     * ("0", "1", …).  For named NARCs the keys are slash-separated paths such
-     * as "sprites/player.ncgr".
+     * (`"0"`, `"1"`, …). For named NARCs the keys are slash-separated paths such
+     * as `"sprites/player.ncgr"`.
+     *
+     * @param data The raw NARC bytes.
+     * @return A map from path (or index string) to file contents.
+     * @throws IllegalArgumentException if the data is not a valid NARC container.
      */
     fun unpackNamed(data: ByteArray): Map<String, ByteArray> {
         require(data.size >= 16) { "NARC too small" }
@@ -202,7 +216,13 @@ object NarcArchive {
         return rawFiles.mapIndexed { i, bytes -> filePaths[i] to bytes }.toMap()
     }
 
-    /** Walks the FNT and populates [filePaths] with the full path for each file ID. */
+    /**
+     * Walks the FNT and populates [filePaths] with the full path for each file ID.
+     *
+     * @param fnt Raw FNT bytes from the BTNF section.
+     * @param numFiles Total number of files (length of [filePaths]).
+     * @param filePaths Output array indexed by file ID; each element is set to the resolved path.
+     */
     private fun parseFnt(fnt: ByteArray, numFiles: Int, filePaths: Array<String>) {
         // Read number of directories from root entry (bytes 6-7)
         val numDirs = u16(fnt, 6)
@@ -282,10 +302,14 @@ object NarcArchive {
     // -------------------------------------------------------------------------
 
     /**
-     * Packs a named map into a NARC with a full FNT.
+     * Packs a named map of files into a NARC container with a full file name table (FNT).
      *
-     * Keys are slash-separated paths (e.g. "sprites/player.bin").  Files within
-     * the same directory are stored in sorted order.
+     * Keys are slash-separated paths (e.g. `"sprites/player.bin"`). Files within the same
+     * directory are stored in sorted order. The resulting NARC can be unpacked with either
+     * [unpack] (index-based) or [unpackNamed] (path-based).
+     *
+     * @param files Map of slash-separated paths to file contents.
+     * @return A valid NARC byte array with a populated FNT.
      */
     fun packNamed(files: Map<String, ByteArray>): ByteArray {
         if (files.isEmpty()) return pack(emptyList())
@@ -437,7 +461,13 @@ object NarcArchive {
         return if (parent.isEmpty()) dirNames[dirIdx] else "$parent/${dirNames[dirIdx]}"
     }
 
-    /** Assembles a complete NARC from an ordered file list and a pre-built FNT byte array. */
+    /**
+     * Assembles a complete NARC from an ordered file list and a pre-built FNT byte array.
+     *
+     * @param files Ordered file data (index = file ID).
+     * @param fnt Pre-built FNT bytes to embed in the BTNF section.
+     * @return A valid NARC byte array.
+     */
     private fun assembleNarc(files: List<ByteArray>, fnt: ByteArray): ByteArray {
         val numFiles = files.size
         val gmifData = buildGmifData(files)
@@ -498,7 +528,12 @@ object NarcArchive {
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Concatenates file data, padding each to a 4-byte boundary. */
+    /**
+     * Concatenates file data, padding each entry to a 4-byte boundary.
+     *
+     * @param files The files to concatenate.
+     * @return A single byte array with all file data, each entry 4-byte aligned.
+     */
     private fun buildGmifData(files: List<ByteArray>): ByteArray {
         val totalSize = files.sumOf { align4(it.size) }
         val buf = ByteArray(totalSize)

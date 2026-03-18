@@ -14,7 +14,13 @@ internal object LzCommon {
      * Modular window indexing (`start + len % dist`) lets the search naturally
      * produce overlapping (run-length style) back-references.
      *
-     * @return Pair(matchLength, matchDistance); length == 0 if no suitable match found.
+     * @param data The input data buffer.
+     * @param pos Current write position (start of the lookahead).
+     * @param end Exclusive end of the input data.
+     * @param minMatch Minimum match length to consider a back-reference worthwhile.
+     * @param maxMatch Maximum match length to search for.
+     * @param maxDist Maximum look-back distance.
+     * @return `Pair(matchLength, matchDistance)`; `matchLength == 0` if no suitable match was found.
      */
     fun findBestMatch(
         data: ByteArray,
@@ -44,11 +50,16 @@ internal object LzCommon {
     }
 
     /**
-     * Copies [len] bytes from [output][dst - dist] to [output][dst], one byte at a
-     * time, so overlapping runs (dist < len) are handled correctly.
+     * Copies [len] bytes from `output[dst - dist]` to `output[dst]`, one byte at a
+     * time so that overlapping runs (`dist < len`) are handled correctly.
      * Stops early if the write would exceed [limit].
      *
-     * @return new dst value after the copy.
+     * @param output The output buffer (read and written in-place).
+     * @param dst Current write position in [output].
+     * @param dist Back-reference distance (number of bytes to look back).
+     * @param len Number of bytes to copy.
+     * @param limit Exclusive upper bound on the write position.
+     * @return The new [dst] value after the copy.
      */
     fun copyMatch(output: ByteArray, dst: Int, dist: Int, len: Int, limit: Int): Int {
         val copyEnd = minOf(dst + len, limit)

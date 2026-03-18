@@ -18,6 +18,9 @@ object NdsCompression {
 
     /**
      * Returns `true` if the first byte of [input] is a recognised DS compression magic byte.
+     *
+     * @param input The byte array to inspect.
+     * @return `true` if the array is non-empty and starts with a known magic byte; `false` otherwise.
      */
     fun isCompressed(input: ByteArray): Boolean =
         input.isNotEmpty() && (input[0].toInt() and 0xFF) in MAGIC_BYTES
@@ -25,6 +28,8 @@ object NdsCompression {
     /**
      * Decompresses [input] using the codec matching its magic byte.
      *
+     * @param input The compressed data; the first byte must be a recognised magic byte.
+     * @return The decompressed data.
      * @throws IllegalArgumentException if [input] is empty or the magic byte is not recognised.
      */
     fun decompress(input: ByteArray): ByteArray {

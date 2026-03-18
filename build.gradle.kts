@@ -2,6 +2,7 @@ plugins {
     kotlin("multiplatform") version "2.3.0"
     id("com.google.devtools.ksp") version "2.3.4"
     id("org.jetbrains.kotlinx.kover") version "0.8.3"
+    id("org.jetbrains.dokka") version "2.0.0"
     id("com.vanniktech.maven.publish") version "0.30.0"
 }
 

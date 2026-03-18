@@ -146,8 +146,12 @@ object RleCodec {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns the number of consecutive identical bytes starting at [pos],
-     * capped at [MAX_RUN].
+     * Returns the number of consecutive identical bytes starting at [pos], capped at [MAX_RUN].
+     *
+     * @param data The input byte array.
+     * @param pos The position to start measuring from.
+     * @param end The exclusive end of the search range.
+     * @return Run length in `[0, MAX_RUN]`.
      */
     private fun measureRun(data: ByteArray, pos: Int, end: Int): Int {
         if (pos >= end) return 0
@@ -157,13 +161,25 @@ object RleCodec {
         return len
     }
 
-    /** Reads a 24-bit little-endian unsigned integer from [buf] at [offset]. */
+    /**
+     * Reads a 24-bit little-endian unsigned integer from [buf] at [offset].
+     *
+     * @param buf The source byte array.
+     * @param offset Byte offset to read from.
+     * @return The 24-bit value as a [Long].
+     */
     private fun readU24(buf: ByteArray, offset: Int): Long =
         (buf[offset].toLong() and 0xFF) or
                 ((buf[offset + 1].toLong() and 0xFF) shl 8) or
                 ((buf[offset + 2].toLong() and 0xFF) shl 16)
 
-    /** Writes a 24-bit little-endian value to [buf] at [offset]. */
+    /**
+     * Writes a 24-bit little-endian value to [buf] at [offset].
+     *
+     * @param buf The destination byte array.
+     * @param offset Byte offset to write to.
+     * @param value The value to write (only the lowest 24 bits are used).
+     */
     private fun writeU24(buf: ByteArray, offset: Int, value: Long) {
         buf[offset] = (value and 0xFF).toByte()
         buf[offset + 1] = (value.ushr(8) and 0xFF).toByte()
