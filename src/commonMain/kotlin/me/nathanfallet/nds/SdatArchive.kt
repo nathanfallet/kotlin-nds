@@ -619,9 +619,16 @@ data class SdatArchive(
 
             for (i in 0 until 8) {
                 val names = slotNames[i]
-                if (names == null || names.isEmpty()) {
+                if (names == null) {
                     slots.add(null)
                     slotOffsets[i] = 0
+                } else if (names.isEmpty()) {
+                    // Active slot with no entries: emit a minimal nEntries=0 record so that
+                    // the slot offset is non-zero and readers don't misparse the block header.
+                    slotOffsets[i] = offset
+                    val emptyRecord = ByteArray(4) // nEntries = 0, already zero-initialised
+                    slots.add(SlotData(emptyRecord, offset))
+                    offset += 4
                 } else {
                     slotOffsets[i] = offset
                     // record bytes: u32 nEntries + nEntries × u32 stringOffsets + null-terminated strings

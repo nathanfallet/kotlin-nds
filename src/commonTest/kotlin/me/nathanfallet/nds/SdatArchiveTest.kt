@@ -622,6 +622,43 @@ class SdatArchiveTest {
         assertEquals("SDAT", packed.decodeToString(0, 4))
     }
 
+    /**
+     * Verifies that packing an archive with no SYMB block (all fallback names) omits the SYMB block,
+     * and that a reparsed archive still has the correct fallback names.
+     */
+    @Test
+    fun `pack without real names omits SYMB block`() {
+        val archive = SdatArchive.unpack(buildMinimalSdat(includeSymb = false))
+        val packed = SdatArchive.pack(archive)
+        // Confirm no "SYMB" magic appears in the output
+        val packedStr = packed.decodeToString()
+        assertFalse(packedStr.contains("SYMB"), "SYMB block should not be written when all names are fallbacks")
+        // And the reparsed archive still assigns fallback names
+        val reparsed = SdatArchive.unpack(packed)
+        assertEquals("SSEQ_0", reparsed.sequences[0].name)
+        assertEquals("SBNK_0", reparsed.banks[0].name)
+    }
+
+    /**
+     * Verifies that packing an archive where some types have real names but others have empty lists
+     * produces a valid SDAT that round-trips correctly (tests the empty-slot SYMB record fix).
+     */
+    @Test
+    fun `pack with empty streams slot still produces valid SDAT`() {
+        // Build an archive with no streams, but real names on sequences
+        val archive = SdatArchive(
+            sequences = listOf(SdatSseqFile("MY_SEQ", byteArrayOf(1, 2), 0, 0, 0, 0, 0, 0)),
+            banks = emptyList(),
+            waveArchives = emptyList(),
+            streams = emptyList(),
+        )
+        val packed = SdatArchive.pack(archive)
+        val reparsed = SdatArchive.unpack(packed)
+        assertEquals(1, reparsed.sequences.size)
+        assertEquals("MY_SEQ", reparsed.sequences[0].name)
+        assertEquals(0, reparsed.streams.size)
+    }
+
     // =========================================================================
     // Small helpers (no dependency on production code utilities)
     // =========================================================================
