@@ -1,9 +1,9 @@
-# kotlin-nds
+# Kotlin DS
 
 Kotlin Multiplatform utilities to work with .nds files
 
 [![License](https://img.shields.io/github/license/kotlinds/kotlinds)](LICENSE)
-[![Maven Central Version](https://img.shields.io/maven-central/v/dev.kotlinds/core)](https://klibs.io/project/kotlinds/kotlinds)
+[![Maven Central Version](https://img.shields.io/maven-central/v/dev.kotlinds/nds-all)](https://klibs.io/project/kotlinds/kotlinds)
 [![Issues](https://img.shields.io/github/issues/kotlinds/kotlinds)]()
 [![Pull Requests](https://img.shields.io/github/issues-pr/kotlinds/kotlinds)]()
 
