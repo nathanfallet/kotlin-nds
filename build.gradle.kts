@@ -7,7 +7,7 @@ plugins {
 
 allprojects {
     group = "dev.kotlinds"
-    version = "1.2.0"
+    version = "1.2.1"
     project.ext.set("url", "https://github.com/kotlinds/kotlinds")
     project.ext.set("license.name", "Apache 2.0")
     project.ext.set("license.url", "https://www.apache.org/licenses/LICENSE-2.0.txt")

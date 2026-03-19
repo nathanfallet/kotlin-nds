@@ -14,7 +14,8 @@ Kotlin Multiplatform utilities to work with .nds files
 - **NARC archive support** — Unpack and repack NARC containers, with both anonymous (index-based) and named (path-based)
   file access.
 - **SDAT archive support** — Unpack and repack SDAT sound archives; decode STRM streams and SWAR wave archives to
-  standard WAV files (PCM8, PCM16, IMA-ADPCM); convert SSEQ sequences to standard MIDI files.
+  standard WAV files (PCM8, PCM16, IMA-ADPCM); convert SSEQ sequences to standard MIDI files; export SBNK instrument
+  banks to SoundFont 2 (SF2) files for authentic NDS music playback.
 - **Compression codecs** — BLZ, LZSS/LZ10, LZ11, RLE, and Huffman (4-bit & 8-bit). Auto-detection dispatches to the
   right codec from the magic byte.
 - **Multiplatform** — Runs on JVM, JavaScript (Node.js & browser), and Native (macOS, Linux, iOS, Windows, …).
@@ -25,8 +26,8 @@ Add one or more modules to your project:
 
 ```kotlin
 dependencies {
-    implementation("dev.kotlinds:nds-all:1.2.0") // All modules
-    implementation("dev.kotlinds:nds-narc:1.2.0") // Specific module
+    implementation("dev.kotlinds:nds-all:1.2.1") // All modules
+    implementation("dev.kotlinds:nds-narc:1.2.1") // Specific module
 }
 ```
 
@@ -150,6 +151,42 @@ wavs.forEachIndexed { i, w -> File("sample_$i.wav").writeBytes(w) }
 // SSEQ → standard MIDI file (uses General MIDI instruments, not game sounds)
 val mid: ByteArray = archive.sequences[0].toMidi()
 File("bgm.mid").writeBytes(mid)
+```
+
+#### Exporting to SF2 for authentic playback
+
+A MIDI file alone uses General MIDI instruments, which don't sound like the original game. Export the
+sequence's instrument bank as a SoundFont 2 (SF2) file and use it together with the MIDI for
+authentic NDS music playback:
+
+```kotlin
+// SSEQ + SBNK + SWAR → SF2 instrument bank
+// The convenience wrapper resolves the bank and wave archives automatically
+val sf2: ByteArray = archive.sequences[0].toSf2(archive)
+val mid: ByteArray = archive.sequences[0].toMidi()
+
+File("bgm.sf2").writeBytes(sf2)
+File("bgm.mid").writeBytes(mid)
+// → play bgm.mid using bgm.sf2 in FluidSynth, a DAW, or any SF2-capable MIDI player
+```
+
+Play from the command line with [FluidSynth](https://www.fluidsynth.org/):
+
+```bash
+fluidsynth bgm.sf2 bgm.mid
+```
+
+If you need the SF2 for a specific bank rather than a sequence, you can call `toSf2` directly on the
+bank and supply its wave archives:
+
+```kotlin
+val bank: SdatSbnkFile = archive.banks[0]
+val wars: List<SdatSwarFile> = bank.wars
+    .filter { it >= 0 }
+    .map { archive.waveArchives[it] }
+
+val sf2: ByteArray = bank.toSf2(wars)
+File("bank.sf2").writeBytes(sf2)
 ```
 
 ### Compression
