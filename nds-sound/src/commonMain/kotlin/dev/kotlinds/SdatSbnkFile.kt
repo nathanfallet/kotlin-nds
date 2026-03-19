@@ -42,4 +42,17 @@ data class SdatSbnkFile(
         result = 31 * result + wars.hashCode()
         return result
     }
+
+    /**
+     * Converts this SBNK instrument bank to a SoundFont 2 (SF2) file.
+     *
+     * The caller must supply the SWAR wave archives in slot order: `wars[0]` corresponds to
+     * `this.wars[0]`, etc.  Unused slots (originally `-1` in [SdatSbnkFile.wars]) must be
+     * excluded by the caller before passing (i.e., only non-negative war indices are included,
+     * mapped to their slot position).
+     *
+     * @param wars Wave archives in slot order matching [SdatSbnkFile.wars].
+     * @return A byte array containing the complete SF2 file.
+     */
+    fun toSf2(wars: List<SdatSwarFile>): ByteArray = SbnkToSf2.convert(this, wars)
 }
