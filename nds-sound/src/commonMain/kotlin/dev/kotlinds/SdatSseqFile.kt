@@ -50,6 +50,32 @@ data class SdatSseqFile(
     fun toMidi(loopCount: Int = 1): ByteArray = SseqToMidi.convert(data, loopCount)
 
     /**
+     * Convenience wrapper that resolves this sequence's instrument bank and associated wave
+     * archives from [archive], then converts the bank to a SoundFont 2 (SF2) file.
+     *
+     * Pair the returned SF2 with [toMidi] for fully authentic NDS music playback:
+     * ```
+     * val sf2 = archive.sequences[0].toSf2(archive)
+     * val mid = archive.sequences[0].toMidi()
+     * File("bgm.sf2").writeBytes(sf2)
+     * File("bgm.mid").writeBytes(mid)
+     * ```
+     *
+     * @param archive The SDAT archive that contains this sequence.
+     * @return A byte array containing the complete SF2 file.
+     */
+    fun toSf2(archive: SdatArchive): ByteArray {
+        val bank = archive.banksBySlot[this.bank]
+            ?: archive.banks.getOrNull(this.bank)
+            ?: return ByteArray(0)
+        val wars = bank.wars.map { slot ->
+            if (slot >= 0) archive.waveArchivesBySlot[slot] ?: archive.waveArchives.getOrNull(slot)
+            else null
+        }
+        return bank.toSf2(wars)
+    }
+
+    /**
      * Compares two [SdatSseqFile] instances for structural equality, including [data] content.
      *
      * @param other The object to compare against.

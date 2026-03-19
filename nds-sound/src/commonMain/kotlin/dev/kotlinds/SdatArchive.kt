@@ -58,6 +58,24 @@ data class SdatArchive(
 ) {
 
     /**
+     * Slot-indexed map of SBNK bank files, keyed by their INFO slot index.
+     *
+     * Unlike [banks] (a dense list), this map preserves the original sparse INFO indices so that
+     * [SdatSseqFile.bank] slot numbers can be resolved correctly. Populated by [unpack]; not part
+     * of [equals]/[hashCode]/[copy] since it is derived from [banks].
+     */
+    internal var banksBySlot: Map<Int, SdatSbnkFile> = emptyMap()
+
+    /**
+     * Slot-indexed map of SWAR wave archives, keyed by their INFO slot index.
+     *
+     * Unlike [waveArchives] (a dense list), this map preserves the original sparse INFO indices
+     * so that [SdatSbnkFile.wars] slot numbers can be resolved correctly. Populated by [unpack];
+     * not part of [equals]/[hashCode]/[copy] since it is derived from [waveArchives].
+     */
+    internal var waveArchivesBySlot: Map<Int, SdatSwarFile> = emptyMap()
+
+    /**
      * Finds a sequence by its symbolic name.
      *
      * @param name The name to look up.
@@ -187,6 +205,7 @@ data class SdatArchive(
 
             // ---- Resolve SBNK entries ------------------------------------------
             val banks = mutableListOf<SdatSbnkFile>()
+            val banksBySlot = mutableMapOf<Int, SdatSbnkFile>()
             val sbnkCount = u32(data, infoOffset + sbnkRecOff).toInt()
             for (i in 0 until sbnkCount) {
                 val entryOff = u32(data, infoOffset + sbnkRecOff + 4 + i * 4).toInt()
@@ -203,11 +222,14 @@ data class SdatArchive(
                     symbNames[SLOT_SBNK][i]
                 else
                     "SBNK_$i"
-                banks.add(SdatSbnkFile(name, fileData(fileId), unk, wars))
+                val sbnk = SdatSbnkFile(name, fileData(fileId), unk, wars)
+                banks.add(sbnk)
+                banksBySlot[i] = sbnk
             }
 
             // ---- Resolve SWAR entries ------------------------------------------
             val waveArchives = mutableListOf<SdatSwarFile>()
+            val waveArchivesBySlot = mutableMapOf<Int, SdatSwarFile>()
             val swarCount = u32(data, infoOffset + swarRecOff).toInt()
             for (i in 0 until swarCount) {
                 val entryOff = u32(data, infoOffset + swarRecOff + 4 + i * 4).toInt()
@@ -220,7 +242,9 @@ data class SdatArchive(
                     symbNames[SLOT_SWAR][i]
                 else
                     "SWAR_$i"
-                waveArchives.add(SdatSwarFile(name, fileData(fileId), unk))
+                val swar = SdatSwarFile(name, fileData(fileId), unk)
+                waveArchives.add(swar)
+                waveArchivesBySlot[i] = swar
             }
 
             // ---- Resolve STRM entries ------------------------------------------
@@ -243,7 +267,10 @@ data class SdatArchive(
                 streams.add(SdatStrmFile(name, fileData(fileId), unk, volume, priority, players))
             }
 
-            return SdatArchive(sequences, banks, waveArchives, streams)
+            return SdatArchive(sequences, banks, waveArchives, streams).also {
+                it.banksBySlot = banksBySlot
+                it.waveArchivesBySlot = waveArchivesBySlot
+            }
         }
 
         // -------------------------------------------------------------------------

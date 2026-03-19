@@ -74,7 +74,6 @@ kotlin {
         browser()
     }
 
-    applyDefaultHierarchyTemplate()
     sourceSets {
         commonMain.dependencies {
             api(projects.ndsRom)

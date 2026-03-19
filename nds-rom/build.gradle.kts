@@ -74,7 +74,6 @@ kotlin {
         browser()
     }
 
-    applyDefaultHierarchyTemplate()
     sourceSets {
         commonTest.dependencies {
             implementation(kotlin("test"))
