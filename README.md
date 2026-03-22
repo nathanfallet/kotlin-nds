@@ -227,8 +227,11 @@ val decompressedArm9: ByteArray = BlzCodec.decompress(compressedArm9)
 
 ## Libraries & tools using kotlin-nds
 
-- [pokemon-map-randomizer](https://github.com/kotlinds/pokemon-map-randomizer): A Kotlin/Compose Multiplatform port
-  of hgss-map-randomizer, the original C++ map randomizer for Pokémon HeartGold, SoulSilver, Black 2, and White 2.
+- [pokemon-map-randomizer](https://github.com/kotlinds/pokemon-map-randomizer): A Kotlin/Compose Multiplatform port of
+  hgss-map-randomizer, the original C++ map randomizer for Pokémon HeartGold, SoulSilver, Black 2, and White 2.
+- [nds-music-player](https://github.com/kotlinds/nds-music-player): A cross-platform Nintendo DS music player built with
+  Kotlin Multiplatform. Load any `.nds` ROM and browse, search, and play its full soundtrack — on iOS, Android, and
+  desktop.
 
 If you are using kotlin-nds in your project/library, please let us know by opening a pull request to add it to this
 list!
